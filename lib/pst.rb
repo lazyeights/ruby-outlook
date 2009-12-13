@@ -343,10 +343,11 @@ module Pst
     end
   
     def validate!
+      puts self.inspect
     end
   
-    def to_s
-      "#<Pst:BlockPointer id=%08x, file_offset=%08x, @size=%08x, @alloc_ptr= %08x>" [ @id, @file_offset, @size, @alloc_ptr ]
+    def inspect
+      "#<Pst:BlockPointer id=%08x, file_offset=%08x, @size=%08x, @alloc_ptr= %08x>" % [ @id, @file_offset, @size, @alloc_ptr ]
     end
   
   end
@@ -394,6 +395,7 @@ module Pst
       case (offset & 0xf)
       when 0xf
         #TODO: data offset is an external reference
+        raise PstFile::FormatError, 'unsupported table data offset %04x' % offset
       else
         ref_start, ref_end = @table_index[(offset >> 4) / 2]
         return @block[ref_start..ref_end]
