@@ -1,3 +1,6 @@
+# mapi_types.rb
+# Copyright (c) 2009 David B. Conrad
+
 module MAPI
 
   module Types
