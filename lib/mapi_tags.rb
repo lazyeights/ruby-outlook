@@ -806,6 +806,7 @@ module MAPI
     [ 0x65E2, 'PT_BINARY', 'PR_CHANGE_KEY', '', ''],
     [ 0x65E3, 'PT_BINARY', 'PR_PREDECESSOR_CHANGE_LIST', '', ''],
     [ 0x67FF, 'PT_LONG', 'PR_PST_PASSWORD', '', ''],
+    [ 0x6869, 'PT_LONG', 'PR_FREEBUSY_NUM_MONTHS', '', ''],
   ]
 
   PROPERTY_TAGS = Hash.new
