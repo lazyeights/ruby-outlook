@@ -48,6 +48,12 @@ module Pst
       end
     end
   
+    def read_block offset, size
+      @io.seek offset
+      buffer = @io.read size
+      raise PstFile::FormatError, "tried to read #{size} bytes at 0x#{offset} but only got #{buffer.length}" if buffer.length != size
+    end
+
     def find_message id
       if @message_store.find id then
         messaage = Message.new self, id
