@@ -1,6 +1,10 @@
 # message.rb
 # Copyright (c) 2009 David B. Conrad
 
+$LOAD_PATH << '../lib'
+
+require 'unpackle'
+
 module Pst
   
   class Message
@@ -10,9 +14,10 @@ module Pst
       @pst_file = pst_file
       @id = id
 
-      @data_block = @pst_file.find_message_data_block @id
-      @assoc_data_block = @pst_file.find_message_assoc_block @id 
-      @property_store = PropertyStore.new @pst_file, @data_block, @assoc_data_block
+      @data_block = @pst_file.find_message_data_block(@id)
+      @assoc_data = AssociatedDataStore.new @pst_file, @pst_file.find_message_assoc_block(@id)
+      
+      @property_store = PropertyStore.new @pst_file, @data_block, @assoc_data
     end
 
     def message_class
@@ -22,43 +27,59 @@ module Pst
     
     def to_s
       puts "#<Pst::Message id=%08x file_offset=%08x size=%08x>" % [ @id, @data_block.file_offset, @data_block.size ]
+      puts @assoc_data.inspect
+      
       @property_store.each do | property |
         puts property.inspect
       end
     end
   end
-=begin -----------TODO
-  class AssociatedFileStore
+
+  class AssociatedDataStore
     
     SIGNATURE_OFFSET = 0x00
     NODE_TYPE_OFFSET = 0x01
     COUNT_OFFSET = 0x02
     TABLE_OFFSET = 0x04
   
-    def initialize pst_file, offset, size
-      @block = pst_file.read_block offset, size
-      @signature = @block[SIGANTURE_OFFSET, 1].unpack('C').first
-      @node_type = @block[NODE_TYPE_OFFSET, 1].unpack('C').first
-      @count = @block[COUNT_OFFSET, 2].unpack('V').first
-      validate!
-
-      build_data_chains
+    def initialize pst_file, assoc_data_block
+      
+      unless assoc_data_block.nil?
+        @block = pst_file.read_block assoc_data_block.file_offset, assoc_data_block.size
+        @signature = @block[SIGNATURE_OFFSET, 1].unpack('C').first
+        @node_type = @block[NODE_TYPE_OFFSET, 1].unpack('C').first
+        @count = @block[COUNT_OFFSET, 2].unpack('v').first
+        validate!
+        build_data_chains
+      end
+      
     end
     
     def build_data_chains #TODO: add recursive build when next_block is not zero
       @node_table = Array.new
-      @block[TABLE_OFFSET..-1].scan(/.{24}/m) do | entry |
-        id, file_offset, next_block = entry.unpack('Q3')
-        @node_table << [ id, file_offset, next_block ]
+      @block[TABLE_OFFSET..-1].scan(/(.{8})(.{8})(.{8})/m) do | entry |
+        entry.map! { |e| e.unpackle('T').first }
+        id, data_id, next_block = entry
+        data_id &= 0xffff #TODO: high 16-bits of data_id is sometimes non-zero value
+        raise NotImplementedError, 'multi-block associated data chain not supported' unless next_block == 0
+        @node_table << [ id, data_id, next_block ]
       end
-      if 
     end
   
     def validate!
       raise PstFile::FormatError, 'unknown assoc data signature 0x%04x at offset %08x' % [ @signature, offset ] unless @signature == 0x02
     end
+    
+    def inspect
+      str = "#<Pst::AssociatedDataStore signature=%08x node_type=%08x count=%08x>" % [ @signature, @node_type, @count ]
+      @node_table.each do | id, data_id, next_block |
+        str << "#<Pst::AssocData id=%04x, data_id=%04x, next_block=%04x>" % [ id, data_id, next_block ]
+      end
+      str
+    end
+    
   end
-=end
+
   class DataBlock
     include MAPI::Types
 

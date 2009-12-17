@@ -52,6 +52,7 @@ module Pst
       @io.seek offset
       buffer = @io.read size
       raise PstFile::FormatError, "tried to read #{size} bytes at 0x#{offset} but only got #{buffer.length}" if buffer.length != size
+      buffer
     end
 
     def find_message id
