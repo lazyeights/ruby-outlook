@@ -1,8 +1,9 @@
-# pst.rb
+# pst_file.rb
 # Copyright (c) 2009 David B. Conrad
 
 $LOAD_PATH << '../lib'
 
+require 'pst_header'
 require 'encryption'
 require 'mapi_types'
 require 'mapi_tags'
@@ -13,10 +14,8 @@ module Pst
   
   class PstFile
 
-    ROOT_DESCRIPTOR_ID = 0x2
-  
-    attr_reader :io
-  
+    ROOT_MESSAGE_ID = 0x21
+    
     class FormatError < StandardError
     end
 
@@ -25,14 +24,17 @@ module Pst
       io.pos = 0
     
       @header = Header.new io.read(Header::SIZE)
-      puts @header.inspect
         
-      @message_store = MessageStore.new @io, @header.descriptor_idx_ptr 
-      @file_store = FileStore.new @io, @header.data_struct_idx_ptr
+      @message_store = MessageStore.new @io, @header.message_store_ptr 
+      @file_store = DataStore.new @io, @header.data_store_ptr
       #@extended_attributes = ExtendedAttributes.new @io. ...
 
     end
   
+    def root
+      find_message(ROOT_MESSAGE_ID)
+    end
+    
     def is_encrypted?
       @header.file_type == 0x17
     end
@@ -55,92 +57,51 @@ module Pst
       buffer
     end
 
+    def find_block data_id
+      @file_store.find data_id
+    end
+    
     def read_data_block data_id
-      read_block find_block(data_id).file_offset, find_block(data_id).size
+      read_block find_block(data_id).data_ptr, find_block(data_id).size
     end
     
     def read_enc_data_block data_id
-      read_enc_block find_block(data_id).file_offset, find_block(data_id).size
+      read_enc_block find_block(data_id).data_ptr, find_block(data_id).size
     end
     
-    def find_message id
-      if @message_store.find id then
-        messaage = Message.new self, id
+    def find_message message_id
+      if @message_store.find message_id then
+        messaage = Message.new self, message_id
       else
         # no message found with that id
       end
     end
     
-    def find_message_data_block id
-      @file_store.find @message_store.find(id).data_id
+    def find_message_data_block message_id
+      @file_store.find @message_store.find(message_id).data_id
     end
 
-    def find_message_assoc_block id
-      assoc_data_id = @message_store.find(id).assoc_data_id
+    def find_message_assoc_block message_id
+      assoc_data_id = @message_store.find(message_id).assoc_data_id
       @file_store.find assoc_data_id unless assoc_data_id == 0
     end
     
-    def find_block id
-      @file_store.find id
-    end
-    
-  end
-
-  class Header
-
-    SIZE = 512
-    MAGIC = 0x2142444e
-
-    FILE_TYPE_OFFSET = 0x0a
-    FILE_SIZE_OFFSET_64 = 0xb8
-    DESCRIPTOR_IDX_BACK_PTR_64 = 0xd8
-    DESCRIPTOR_IDX_OFFSET_64 = 0xe0  #index2
-    DATA_STRUCT_IDX_BACK_PTR_64 = 0xe8
-    DATA_STRUCT_IDX_OFFSET_64 = 0xf0 #index1
-    IDX_ALLOC_FULL_MAP_64 = 0x180
-    ENCRYPTION_OFFSET_64 = 0X201
-
-    attr_reader :magic, :file_type, :file_size
-    attr_reader :descriptor_idx_ptr, :descriptor_idx_back_ptr, :data_struct_idx_ptr, :data_struct_idx_back_ptr
-
-    def initialize data
-      puts "Reading header..."
-      @magic = data.unpack('N').first
-      @file_type = data[FILE_TYPE_OFFSET]
-      @descriptor_idx_ptr = data[DESCRIPTOR_IDX_OFFSET_64, 8].unpack('Q').first
-      @descriptor_idx_back_ptr = data[DESCRIPTOR_IDX_BACK_PTR_64, 8].unpack('Q').first
-      @data_struct_idx_ptr = data[DATA_STRUCT_IDX_OFFSET_64, 8].unpack('Q').first
-      @data_struct_idx_back_ptr = data[DATA_STRUCT_IDX_BACK_PTR_64, 8].unpack('Q').first
-      @file_size = data[FILE_SIZE_OFFSET_64, 8].unpack('Q').first
-      self.validate!
-    end
-
-    def inspect
-      "#<Pst::Header descriptor b-tree=%08x, descriptor back ptr=%08x, block b-tree=%08x, block back ptr=%08x, file type=%04x, file size=%08x" % 
-        [ @descriptor_idx_ptr, @descriptor_idx_back_ptr, @data_struct_idx_ptr, @data_struct_idx_back_ptr, @file_type, @file_size ]
-    end
-  
-    def validate!    
-      raise PstFile::FormatError, "bad signature on pst file (#{'0x%x' % @magic})" unless @magic == MAGIC 
-    end
-  
   end
 
   class MessageStore
 
     BLOCK_SIZE = 512
   
-    attr_reader :node_table
-    attr_accessor :top_level_nodes, :root
-  
+    attr_reader :messages
+    
     def initialize io, offset
       puts "Reading message store tree at 0x%08x..." % offset
-      @node_table = Array.new
+      @messages = Array.new
       self.validate!
     
       build_index io, offset
     
-      puts "Added %d messages to the message store" % @node_table.size
+      puts "Added %d messages to the message store" % @messages.size
     end
 
     def build_index io, offset
@@ -156,9 +117,9 @@ module Pst
         node.node_table.each do | iterator |
           case iterator.parent_id
           when 0x0000
-            @node_table << iterator
+            @messages << iterator
           when iterator.id
-            @node_table << iterator
+            @messages << iterator
             @root = iterator
           else
             parent = self.find(iterator.parent_id)
@@ -173,19 +134,19 @@ module Pst
       end
     end
   
-    def find identifier
-      @node_table.each do | node |
-        return node if node.id == identifier
-        child = find_recursive identifier, node
+    def find message_id
+      @messages.each do | node |
+        return node if node.id == message_id
+        child = find_recursive message_id, node
         return child unless child == nil
       end
-      raise PstFile::FormatError, "no message with id 0x%08x in message store" % identifier   
+      raise PstFile::FormatError, "no message with id 0x%08x in message store" % message_id   
     end
   
-    def find_recursive identifier, parent
+    def find_recursive message_id, parent
       parent.children.each do | node |
-        return node if node.id == identifier
-        child = find_recursive identifier, node
+        return node if node.id == message_id
+        child = find_recursive message_id, node
         return child unless child == nil      
       end
       nil
@@ -196,20 +157,18 @@ module Pst
     
   end
 
-  class FileStore
+  class DataStore
 
     BLOCK_SIZE = 512
   
-    attr_reader :node_table
-  
     def initialize io, offset
       puts "Reading file store tree at 0x%08x..." % offset
-      @node_table = Array.new
+      @pointers = Array.new
       self.validate!
     
       build_index io, offset
 
-      puts "Added %d nodes to the file store" % @node_table.size
+      puts "Added %d nodes to the file store" % @pointers.size
     end
 
     def build_index io, offset
@@ -218,11 +177,11 @@ module Pst
   
     def read_node_recursive io, offset
       io.seek offset
-      node = IndexBlock.new io.read(FileStore::BLOCK_SIZE)
+      node = IndexBlock.new io.read(DataStore::BLOCK_SIZE)
     
       case node.node_level
       when 0  #this node contains leaf items
-        @node_table += node.node_table
+        @pointers += node.node_table
       else    #this node contains node items
         node.node_table.each do | iterator |
           read_node_recursive io, iterator.offset_ptr
@@ -231,7 +190,7 @@ module Pst
     end
 
     def find identifier
-      @node_table.each do | node |
+      @pointers.each do | node |
         return node if node.id == identifier
       end
       raise PstFile::FormatError, "no data block with id 0x%08x in file store" % identifier   
@@ -302,14 +261,11 @@ module Pst
     attr_reader :identifier, :parent_ptr, :offset_ptr
 
     def initialize data
-      @id = data[0, 8].unpack('Q').first
-      @parent_ptr = data[8, 8].unpack('Q').first
-      @offset_ptr = data[16, 8].unpack('Q').first
+      @id, @parent_ptr, @offset_ptr = data[0..23].unpack('QQQ')
       self.validate!
     end
   
     def validate!
-      #raise PstFile::FormatError, "back_ptr 0x%08x in this node does not match required 0x%08x" % [ @parent_ptr, @parent_offset ] unless @parent_ptr == @parent_offset
     end
 
     def inspect
@@ -324,10 +280,7 @@ module Pst
     attr_accessor :parent, :children
 
     def initialize data
-      @id = data[0, 8].unpack('Q').first
-      @data_id = data[8, 8].unpack('Q').first
-      @assoc_data_id = data[16, 8].unpack('Q').first
-      @parent_id = data[24, 4].unpack('V').first
+      @id, @data_id, @assoc_data_id, @parent_id = data[0..27].unpack('QQQV')
     
       @parent = nil
       @children = Array.new
@@ -336,8 +289,7 @@ module Pst
     end
   
     def validate!
-      puts self.inspect
-      #raise PstFile::FormatError, "back_ptr 0x%08x in this node does not match required 0x%08x" % [ @parent_ptr, @parent_offset ] unless @parent_ptr == @parent_offset
+      #puts self.inspect
     end
   
     def inspect
@@ -348,22 +300,19 @@ module Pst
 
   class BlockPointer
 
-    attr_reader :id, :file_offset, :size, :alloc_ptr
+    attr_reader :id, :data_ptr, :size, :alloc_ptr
 
     def initialize data
-      @id = data[0, 8].unpack('Q').first
-      @file_offset = data[8, 8].unpack('Q').first
-      @size = data[16, 2].unpack('v').first
-      @alloc_ptr = data[20, 4].unpack('V').first
+      @id, @data_ptr, @size, @flag, @alloc_ptr = data[0..23].unpack('QQvvV')
       self.validate!
     end
   
     def validate!
-      puts self.inspect
+      #puts self.inspect
     end
   
     def inspect
-      "#<Pst:BlockPointer id=%08x, file_offset=%08x, @size=%08x, @alloc_ptr= %08x>" % [ @id, @file_offset, @size, @alloc_ptr ]
+      "#<Pst:BlockPointer id=%08x, data_ptr=%08x, @size=%08x, @alloc_ptr= %08x>" % [ @id, @data_ptr, @size, @alloc_ptr ]
     end
   
   end

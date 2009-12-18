@@ -10,13 +10,13 @@ module Pst
   class Message
     attr_reader :id
     
-    def initialize pst_file, id
+    def initialize pst_file, message_id
       @pst_file = pst_file
-      @id = id
+      @id = message_id
 
       @data_block = @pst_file.find_message_data_block(@id)
-      @assoc_data = AssociatedDataStore.new @pst_file, @pst_file.find_message_assoc_block(@id)
       
+      @assoc_data = AssociatedDataStore.new @pst_file, @pst_file.find_message_assoc_block(@id)
       @property_store = PropertyStore.new @pst_file, @data_block, @assoc_data
     end
 
@@ -25,13 +25,23 @@ module Pst
       #@property_store.find_property_by_tag "PidTagMessageClass"
     end
     
-    def to_s
-      puts "#<Pst::Message id=%08x file_offset=%08x size=%08x>" % [ @id, @data_block.file_offset, @data_block.size ]
-      puts @assoc_data.inspect
+    def properties
+      @property_store
+    end
+    
+    def attachments
+      #TODO
+      raise NotImplementedError, "Pst::Message::message_class not implemented"
+    end
+    
+    def inspect
+      str = "#<Pst::Message id=%08x data_ptr=%08x size=%08x>" % [ @id, @data_block.data_ptr, @data_block.size ]
+      str << 0x0a << @assoc_data.inspect << 0x0a
       
       @property_store.each do | property |
-        puts property.inspect
+        str << property.inspect << 0x0a
       end
+      str
     end
   end
 
@@ -47,8 +57,8 @@ module Pst
       @pst_file = pst_file
       
       unless assoc_data_block.nil?
-        @offset = assoc_data_block.file_offset
-        @block = @pst_file.read_block assoc_data_block.file_offset, assoc_data_block.size
+        @offset = assoc_data_block.data_ptr
+        @block = @pst_file.read_block assoc_data_block.data_ptr, assoc_data_block.size
         @signature = @block[SIGNATURE_OFFSET, 1].unpack('C').first
         @node_type = @block[NODE_TYPE_OFFSET, 1].unpack('C').first
         @count = @block[COUNT_OFFSET, 2].unpack('v').first
@@ -115,7 +125,7 @@ module Pst
     def initialize pst_file, data_block, assoc_data_block
       
       @assoc_data_block = assoc_data_block
-      @block = pst_file.read_enc_block data_block.file_offset, data_block.size
+      @block = pst_file.read_enc_block data_block.data_ptr, data_block.size
       @block_size = data_block.size
       @table_index_offset = @block[INDEX_OFFSET, 2].unpack('v').first
       @block_type = @block[TABLE_TYPE_OFFSET, 2].unpack('v').first
@@ -180,20 +190,24 @@ module Pst
       
       table_header = get_table_data @table_header_offset
       @signature, @identifer_size, @value_size, @table_level, @descriptor_offset = table_header.unpack('CCCCV')
-
-      @table_data = Array.new
-      buffer = get_table_data(@descriptor_offset)
-      buffer.scan(/.{8}/m) do | entry |
-        key, type, value = entry.unpack('vvV')
-        @table_data << Property.new(key, type, value)
-      end
-    
+      
+      build_property_array
+      
       validate!
       
     end
 
-     def each
-      @table_data.each do | property |
+    def build_property_array
+      @properties = Array.new
+      buffer = get_table_data(@descriptor_offset)
+      buffer.scan(/.{8}/m) do | entry |
+        key, type, value = entry.unpack('vvV')
+        @properties << Property.new(key, type, value)
+      end
+    end
+    
+    def each
+      @properties.each do | property |
         yield get_tuple_with_indirection property
       end
     end
@@ -209,6 +223,25 @@ module Pst
     include MAPI::Types
     include MAPI::Tags
   
+    def mapi_type
+      type_str = PROPERTY_TYPES[self.type].first
+      raise PstFile::FormatError, "Unknown PROPERTY_TYPE: type=%x" % self.type if type_str == nil
+      type_str
+    end
+    
+    def mapi_tag
+      hash = PROPERTY_TAGS[ [self.key, self.mapi_type] ]
+      #raise "Unknown PROPERTY_TAG: key=0x%04x type=0x%04x" % [ key, type ] if hash == nil
+      if hash.nil?
+        key_str = "UnknownType (0x%04x)" % self.key
+      else
+        key_str = hash[1]
+        key_str = hash[0] if key_str.empty?
+        key_str = "UnknownType (0x%04x)" % self.key if key_str.empty?
+      end
+      key_str
+    end
+    
     def inspect
       type_str = PROPERTY_TYPES[self.type].first
       raise PstFile::FormatError, "Unknown PROPERTY_TYPE: type=%x" % self.type if type_str == nil
