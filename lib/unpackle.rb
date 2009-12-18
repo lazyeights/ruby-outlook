@@ -6,7 +6,7 @@ class String
     def unpackle format
       case format
       when 'T'
-        array = self.unpack("V2")
+        array = self.unpack('V2')
         str = [ (array[0] << 32) + array[1] ]
       else    
         str = self.unpack(format)

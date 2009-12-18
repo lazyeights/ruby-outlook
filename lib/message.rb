@@ -44,8 +44,11 @@ module Pst
   
     def initialize pst_file, assoc_data_block
       
+      @pst_file = pst_file
+      
       unless assoc_data_block.nil?
-        @block = pst_file.read_block assoc_data_block.file_offset, assoc_data_block.size
+        @offset = assoc_data_block.file_offset
+        @block = @pst_file.read_block assoc_data_block.file_offset, assoc_data_block.size
         @signature = @block[SIGNATURE_OFFSET, 1].unpack('C').first
         @node_type = @block[NODE_TYPE_OFFSET, 1].unpack('C').first
         @count = @block[COUNT_OFFSET, 2].unpack('v').first
@@ -56,26 +59,41 @@ module Pst
     end
     
     def build_data_chains #TODO: add recursive build when next_block is not zero
-      @node_table = Array.new
+      @node_table = Hash.new
       @block[TABLE_OFFSET..-1].scan(/(.{8})(.{8})(.{8})/m) do | entry |
         entry.map! { |e| e.unpackle('T').first }
         id, data_id, next_block = entry
-        data_id &= 0xffff #TODO: high 16-bits of data_id is sometimes non-zero value
+        data_id &= 0xffffffff #TODO: high 32-bits of data_id is sometimes non-zero value. Why?
         raise NotImplementedError, 'multi-block associated data chain not supported' unless next_block == 0
-        @node_table << [ id, data_id, next_block ]
+        @node_table[id] = data_id
       end
     end
   
+    def read id 
+      buffer = @pst_file.read_data_block @node_table[id]
+      data = String.new
+      if buffer[0..1].unpack('v').first == 0x0101
+        count, size = buffer[2..7].unpack('vV')
+        buffer[8..-1].scan(/.{8}/m).each do | entry |
+          segment_id = entry.unpack('Q').first
+          data << @pst_file.read_enc_data_block(segment_id)
+        end
+        data
+      end
+    end
+   
     def validate!
       raise PstFile::FormatError, 'unknown assoc data signature 0x%04x at offset %08x' % [ @signature, offset ] unless @signature == 0x02
     end
     
     def inspect
-      str = "#<Pst::AssociatedDataStore signature=%08x node_type=%08x count=%08x>" % [ @signature, @node_type, @count ]
-      @node_table.each do | id, data_id, next_block |
-        str << "#<Pst::AssocData id=%04x, data_id=%04x, next_block=%04x>" % [ id, data_id, next_block ]
+      str = "#<Pst::AssociatedDataStore offset=%08x sig=%02x node_type=%02x count=%04x [" % [ @offset, @signature, @node_type, @count ]
+      unless @node_table.nil?
+        @node_table.each do | id, data_id |
+          str << " \"%08x => %08x\"" % [ id, data_id ]
+        end
       end
-      str
+      str << " ]>"
     end
     
   end
@@ -94,16 +112,17 @@ module Pst
   
     attr_reader :block, :size, :block_type, :signature, :element_size
   
-    def initialize pst_file, offset, size
-
-      @block = pst_file.read_enc_block offset, size
-      @block_size = size
+    def initialize pst_file, data_block, assoc_data_block
+      
+      @assoc_data_block = assoc_data_block
+      @block = pst_file.read_enc_block data_block.file_offset, data_block.size
+      @block_size = data_block.size
       @table_index_offset = @block[INDEX_OFFSET, 2].unpack('v').first
       @block_type = @block[TABLE_TYPE_OFFSET, 2].unpack('v').first
       @table_header_offset = @block[TABLE_HEADER_OFFSET, 4].unpack('V').first
       last_element_index = @block[@table_index_offset]
         
-      raise PstFile::FormatError, 'unknown block type 0x%04x at offset %08x' % [ @block_type, offset ] unless BLOCK_TYPES[@block_type]
+      raise PstFile::FormatError, 'unknown block type 0x%04x at offset %08x' % [ @block_type, data_block.size ] unless BLOCK_TYPES[@block_type]
       raise PstFile::FormatError, 'index offset 0x%04x beyond block of size 0x%04x' % [ @table_index_offset, @block_size ] unless @table_index_offset <= (@block_size-1)
 
       build_table_index
@@ -123,12 +142,12 @@ module Pst
       case (offset & 0xf)
       when 0xf
         #TODO: data offset is an external reference
-        #raise PstFile::FormatError, 'unsupported table data offset %04x' % offset
-        puts 'unsupported table data offset %04x' % offset
+        buffer = @assoc_data_block.read offset
       else
         ref_start, ref_end = @table_index[(offset >> 4) / 2]
-        return @block[ref_start..ref_end]
+        buffer = @block[ref_start..ref_end]
       end
+      buffer
     end
 
     def get_tuple_with_indirection property
@@ -157,7 +176,7 @@ module Pst
 
     def initialize pst_file, data_block, assoc_data_block
       
-      super pst_file, data_block.file_offset, data_block.size
+      super pst_file, data_block, assoc_data_block
       
       table_header = get_table_data @table_header_offset
       @signature, @identifer_size, @value_size, @table_level, @descriptor_offset = table_header.unpack('CCCCV')

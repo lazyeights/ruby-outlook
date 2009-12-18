@@ -47,7 +47,7 @@ module Pst
         buffer
       end
     end
-  
+
     def read_block offset, size
       @io.seek offset
       buffer = @io.read size
@@ -55,6 +55,14 @@ module Pst
       buffer
     end
 
+    def read_data_block data_id
+      read_block find_block(data_id).file_offset, find_block(data_id).size
+    end
+    
+    def read_enc_data_block data_id
+      read_enc_block find_block(data_id).file_offset, find_block(data_id).size
+    end
+    
     def find_message id
       if @message_store.find id then
         messaage = Message.new self, id
