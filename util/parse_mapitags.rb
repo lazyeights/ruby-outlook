@@ -2,7 +2,7 @@
 # Copyright (c) 2009 David B. Conrad
 
 require 'csv'
-require '../lib/mapi_types'
+require '../lib/pst/mapi_types'
 
 File.open("../data/MapiTags.csv", "r") do | input |
 File.open("../data/MapiTags.out", "w") do | output |

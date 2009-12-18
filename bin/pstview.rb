@@ -1,7 +1,7 @@
 # pstview - inspect Microsoft Outlook PST files
 # Copyright (c) 2009 David B. Conrad
 
-$LOAD_PATH << '../lib'
+$LOAD_PATH << '../lib/pst'
 
 require 'pst_file'
 

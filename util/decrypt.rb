@@ -1,7 +1,7 @@
 # decrypt.rb
 # Copyright (c) 2009 David B. Conrad
 
-require '../lib/encryption'
+require '../lib/pst/encryption'
 include Pst
 
 if ARGV.size < 1 then Process.exit end
