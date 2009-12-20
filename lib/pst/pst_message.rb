@@ -1,9 +1,12 @@
 # message.rb
 # Copyright (c) 2009 David B. Conrad
 
-$LOAD_PATH << '../lib'
+$LOAD_PATH << '../../lib/pst'
 
+require 'mapi_types'
+require 'mapi_tags'
 require 'unpackle'
+require 'note'
 
 module Pst
   
@@ -21,17 +24,20 @@ module Pst
     end
 
     def message_class
-      raise NotImplementedError, "Pst::Message::message_class not implemented"
-      #@property_store.find_property_by_tag "PidTagMessageClass"
+      @property_store.find_property("PidTagMessageClass").value
     end
     
     def properties
-      @property_store
+      @property_store.collect
+    end
+    
+    def find_property mapi_tag
+      @property_store.find_property mapi_tag
     end
     
     def attachments
       #TODO
-      raise NotImplementedError, "Pst::Message::message_class not implemented"
+      raise NotImplementedError, "Pst::Message::attachments not implemented"
     end
     
     def inspect
@@ -161,7 +167,6 @@ module Pst
     end
 
     def get_tuple_with_indirection property
-     
       if IMMEDIATE_TYPES.include? property.type then
         # do nothing. immediate types do not need further processing
       else
@@ -208,10 +213,26 @@ module Pst
     
     def each
       @properties.each do | property |
-        yield get_tuple_with_indirection property
+        yield get_tuple_with_indirection property.clone
       end
     end
   
+    def collect
+      a = Array.new
+      @properties.each do | property |
+        a << get_tuple_with_indirection(property.clone)
+      end
+      a
+    end
+
+    def find_property mapi_tag
+      @properties.each do | property |
+        p = get_tuple_with_indirection property.clone
+        return p if p.mapi_tag == mapi_tag
+      end
+      nil
+    end
+    
     def validate!
       raise PstFile::FormatError, 'unknown table header signature 0x%04x' % @signature unless @signature == 0xb5
       raise PstFile::FormatError, 'unknown table identifer size 0x%04x' % @identifer_size unless @identifer_size == 0x02
@@ -256,6 +277,7 @@ module Pst
       end
       "#<Pst::Property %s (%s) value=%s>" % [ key_str, type_str, self.value.inspect ]
     end
+    
   end
 
 end

@@ -1,14 +1,14 @@
-# pst_file.rb
+# pst_file.rb - File system interface for Microsoft Outlook PST files
 # Copyright (c) 2009 David B. Conrad
 
-$LOAD_PATH << '../lib'
+$LOAD_PATH << '../../lib/pst'
 
 require 'pst_header'
+require 'pst_message'
 require 'encryption'
 require 'mapi_types'
 require 'mapi_tags'
 require 'iconv'
-require 'message'
 
 module Pst
   
@@ -24,7 +24,6 @@ module Pst
       io.pos = 0
     
       @header = Header.new io.read(Header::SIZE)
-        
       @message_store = MessageStore.new @io, @header.message_store_ptr 
       @file_store = DataStore.new @io, @header.data_store_ptr
       #@extended_attributes = ExtendedAttributes.new @io. ...
@@ -71,7 +70,7 @@ module Pst
     
     def find_message message_id
       if @message_store.find message_id then
-        messaage = Message.new self, message_id
+        message = Message.new self, message_id
       else
         # no message found with that id
       end

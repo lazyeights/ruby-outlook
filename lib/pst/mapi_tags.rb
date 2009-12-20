@@ -813,8 +813,8 @@ module MAPI
   
   TAG_ARRAY.each do | tag |
     id, data_type, prop_type, canonical_prop_type, description = tag
-    PROPERTY_TAGS[ [id, data_type] ] = [ prop_type, canonical_prop_type, description ]
+    PROPERTY_TAGS[ [id, data_type] ] ||= [ prop_type, canonical_prop_type, description ]
   end
-
+    
   end
 end

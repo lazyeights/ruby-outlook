@@ -1,7 +1,7 @@
 # pst_header.rb
 # Copyright (c) 2009 David B. Conrad
 
-$LOAD_PATH << '../lib'
+$LOAD_PATH << '../../lib/pst'
 
 module Pst
   
